@@ -115,8 +115,20 @@ export function TickerSearch({
             initial="hidden"
             animate="show"
             exit="exit"
-            style={{ transformOrigin: "top" }}
-            className="panel absolute z-50 mt-2 w-full overflow-hidden p-1.5"
+            // `.panel` sets `position: relative` in globals.css, and as an
+            // unlayered rule it beats Tailwind's `absolute` utility — which left
+            // the dropdown in normal flow, expanding the vertically-centered
+            // header slot and shoving the input off the top of the viewport.
+            // Pin the positioning inline (inline styles win over any class) so
+            // the list always floats directly below the input.
+            style={{
+              transformOrigin: "top",
+              position: "absolute",
+              top: "100%",
+              insetInlineStart: 0,
+              insetInlineEnd: 0,
+            }}
+            className="panel z-50 mt-2 w-full overflow-hidden p-1.5"
             onMouseDown={(e) => e.preventDefault()}
           >
             {hits.map((hit, i) => (
