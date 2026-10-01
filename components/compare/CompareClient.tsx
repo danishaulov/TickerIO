@@ -1,227 +1,122 @@
 "use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
-import { X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { X, Link as LinkIcon, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { SPRING } from "@/lib/motion";
 import { fetchCandles, fetchQuote, fetchTimeframes } from "@/lib/api";
 import { formatPrice, formatPercent, direction } from "@/lib/format";
+import { parseCompareSymbols, normalizeSymbols, COMPARE_LIMIT } from "@/lib/symbol-list";
+import { normalizeComparison } from "@/lib/finance/comparison";
+import { downloadCsv } from "@/lib/export";
 import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
-import { CompareChart, type CompareSeries } from "./CompareChart";
+import { CompareChart } from "./CompareChart";
 import { Skeleton } from "@/components/ui/Skeleton";
 
-const PALETTE = ["#4f8cff", "#16c784", "#f0b90b", "#ea3943", "#7c5cff", "#22d3ee"];
-const DEFAULTS = ["AAPL", "MSFT", "NVDA"];
-const MAX = 6;
-
-const PERIODS: { key: string; label: string; range: string }[] = [
-  { key: "1M", label: "1M", range: "1mo" },
-  { key: "3M", label: "3M", range: "3mo" },
-  { key: "6M", label: "6M", range: "6mo" },
-  { key: "YTD", label: "YTD", range: "ytd" },
-  { key: "1Y", label: "1Y", range: "1y" },
+const PALETTE = ["#5b9bff", "#1fd396", "#f7b733", "#ff6b86", "#ac8aff", "#1cbec8"];
+const PERIODS = [
+  { key: "1M", range: "1mo" }, { key: "3M", range: "3mo" }, { key: "6M", range: "6mo" },
+  { key: "YTD", range: "ytd" }, { key: "1Y", range: "1y" },
+];
+const PRESETS = [
+  { label: "ענקיות טכנולוגיה", symbols: ["AAPL", "MSFT", "NVDA"] },
+  { label: "קריפטו", symbols: ["BTC", "ETH", "SOL"] },
+  { label: "מבט על השוק", symbols: ["SPY", "QQQ", "GLD", "BTC"] },
 ];
 
-function parseSymbols(raw: string | null): string[] {
-  if (!raw) return DEFAULTS;
-  const list = raw
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-  return list.length ? list.slice(0, MAX) : DEFAULTS;
-}
-
 export function CompareClient() {
-  const router = useRouter();
   const params = useSearchParams();
-  const symbols = useMemo(() => parseSymbols(params.get("symbols")), [params]);
-  const [period, setPeriod] = useState("1Y");
-  const range = PERIODS.find((p) => p.key === period)?.range ?? "1y";
+  const symbols = parseCompareSymbols(params.get("symbols"));
+  const period = PERIODS.some((p) => p.key === params.get("period")) ? params.get("period")! : "1Y";
+  const range = PERIODS.find((p) => p.key === period)!.range;
+  const [message, setMessage] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  function setSymbols(next: string[]) {
-    const unique = Array.from(new Set(next.map((s) => s.toUpperCase()))).slice(0, MAX);
-    router.replace(unique.length ? `/compare?symbols=${unique.join(",")}` : "/compare");
+  function update(nextSymbols: string[], nextPeriod = period) {
+    const query = new URLSearchParams({ symbols: normalizeSymbols(nextSymbols, COMPARE_LIMIT).join(","), period: nextPeriod });
+    window.history.replaceState(null, "", `/compare?${query}`);
+    setMessage("");
+  }
+  const quoteResults = useQueries({ queries: symbols.map((s) => ({ queryKey: ["quote", s], queryFn: () => fetchQuote(s), refetchInterval: 30_000 })) });
+  const tfResults = useQueries({ queries: symbols.map((s) => ({ queryKey: ["timeframes", s], queryFn: () => fetchTimeframes(s) })) });
+  const candleResults = useQueries({ queries: symbols.map((s) => ({ queryKey: ["candles", s, range, "1d"], queryFn: () => fetchCandles(s, range, "1d") })) });
+  const series = normalizeComparison(symbols.map((symbol, i) => ({
+    symbol, color: PALETTE[i], candles: candleResults[i].data?.candles ?? [],
+  })));
+  const pending = candleResults.some((r) => r.isPending);
+  const failed = symbols.filter((_, i) => candleResults[i].isError || (!candleResults[i].isPending && (candleResults[i].data?.candles.length ?? 0) < 2));
+
+  async function refresh() {
+    setRefreshing(true);
+    await Promise.allSettled([...quoteResults, ...tfResults, ...candleResults].map((r) => r.refetch()));
+    setRefreshing(false);
+  }
+  async function share() {
+    try { await navigator.clipboard.writeText(window.location.href); setMessage("קישור ההשוואה הועתק."); }
+    catch { setMessage("העתקת הקישור אינה זמינה. אפשר להעתיק את הכתובת משורת הכתובת."); }
+  }
+  function exportComparison() {
+    const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p.t)))].sort((a, b) => a - b);
+    downloadCsv(`tickerio-compare-${period}.csv`, [
+      ["Date (UTC)", ...series.map((s) => `${s.symbol} return %`)],
+      ...dates.map((t) => [new Date(t).toISOString().slice(0, 10), ...series.map((s) => s.points.find((p) => p.t === t)?.value)]),
+    ]);
+  }
+  function percentCell(value: number | undefined, loading: boolean) {
+    if (value == null) return loading ? <Skeleton className="ms-auto h-4 w-12" /> : <span className="text-[var(--fg-dim)]">—</span>;
+    return <span className="font-mono-num" style={{ color: direction(value) === "up" ? "var(--up)" : direction(value) === "down" ? "var(--down)" : "var(--fg-muted)" }}>{formatPercent(value)}</span>;
   }
 
-  const quoteResults = useQueries({
-    queries: symbols.map((s) => ({ queryKey: ["quote", s], queryFn: () => fetchQuote(s), refetchInterval: 30_000 })),
-  });
-  const tfResults = useQueries({
-    queries: symbols.map((s) => ({ queryKey: ["timeframes", s], queryFn: () => fetchTimeframes(s) })),
-  });
-  const candleResults = useQueries({
-    queries: symbols.map((s) => ({
-      queryKey: ["candles", s, range, "1d"],
-      queryFn: () => fetchCandles(s, range, "1d"),
-    })),
-  });
-
-  const series: CompareSeries[] = symbols
-    .map((s, i) => ({
-      symbol: s,
-      color: PALETTE[i % PALETTE.length],
-      closes: candleResults[i].data?.candles.map((c) => c.c) ?? [],
-    }))
-    .filter((x) => x.closes.length > 1);
-
-  const tfPct = (i: number, label: string) =>
-    tfResults[i].data?.rows.find((r) => r.label === label)?.changePct;
-
-  return (
-    <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
-      <div className="mb-5">
-        <h1 className="font-display text-2xl font-bold tracking-tight">השוואה</h1>
-        <p className="text-sm text-[var(--fg-muted)]">ביצועים מנורמלים, מבוססים מחדש לתחילת התקופה.</p>
+  return <main className="mx-auto w-full max-w-[1400px] px-4 py-8 sm:px-6">
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div><h1 className="font-display text-3xl font-extrabold">השוואת ביצועים</h1><p className="mt-2 text-sm text-[var(--fg-muted)]">מניות, קריפטו ומדדים על אותו ציר זמן. התחלה משותפת, תמונה ברורה.</p></div>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={share} className="control inline-flex items-center gap-2"><LinkIcon size={15} />העתק קישור</button>
+        <button onClick={exportComparison} disabled={!series.length || pending} className="control inline-flex items-center gap-2"><Download size={15} />ייצוא CSV</button>
+        <button onClick={refresh} disabled={refreshing || !symbols.length} className="control" aria-label="רענן השוואה"><RefreshCw size={16} className={refreshing ? "animate-spin motion-reduce:animate-none" : ""} /></button>
       </div>
-
-      {/* Controls: add box (with autocomplete) + active chips */}
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <SymbolAutocomplete
-            onSelect={(s) => setSymbols([...symbols, s])}
-            disabled={symbols.length >= MAX}
-            placeholder={symbols.length >= MAX ? `מקסימום ${MAX} סמלים` : "הוסף סמל — AAPL, BTC, GC=F…"}
-            className="w-full sm:w-72"
-          />
-          <span className="text-xs" style={{ color: "var(--fg-dim)" }}>
-            <span className="font-mono-num">{symbols.length}/{MAX}</span> סמלים
-          </span>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <AnimatePresence mode="popLayout">
-            {symbols.map((s, i) => (
-              <motion.span
-                key={s}
-                layout
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={SPRING.snappy}
-                className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm font-semibold"
-                style={{ borderColor: "var(--border)" }}
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
-                {s}
-                <button onClick={() => setSymbols(symbols.filter((x) => x !== s))} aria-label={`הסר ${s}`}>
-                  <X size={14} style={{ color: "var(--fg-dim)" }} />
-                </button>
-              </motion.span>
-            ))}
-          </AnimatePresence>
-          {symbols.length === 0 && (
-            <button
-              onClick={() => setSymbols(DEFAULTS)}
-              className="rounded-lg border px-2.5 py-1.5 text-sm font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
-              style={{ borderColor: "var(--border)" }}
-            >
-              טען סט לדוגמה
-            </button>
-          )}
+    </div>
+    {message && <p role="status" className="mb-4 text-sm text-[var(--accent)]">{message}</p>}
+    <div className="mb-5 flex flex-wrap items-center gap-2"><span className="me-1 text-xs text-[var(--fg-muted)]">התחלה מהירה</span>{PRESETS.map((p) => <button key={p.label} onClick={() => update(p.symbols)} className="control">{p.label}</button>)}</div>
+    <div className="mb-5 flex flex-wrap items-center gap-3">
+      <SymbolAutocomplete onSelect={(s) => update([...symbols, s])} disabled={symbols.length >= COMPARE_LIMIT} placeholder={symbols.length >= COMPARE_LIMIT ? "עד 6 סמלים בהשוואה" : "הוספת סמל להשוואה…"} className="w-full sm:w-72" />
+      {symbols.map((s, i) => <span key={s} className="inline-flex items-center gap-2 rounded-lg border bg-[var(--panel)] px-3 py-2 text-sm font-semibold">
+        <span className="h-2 w-2 rounded-full" style={{ background: PALETTE[i] }} /><bdi>{s}</bdi>
+        <button onClick={() => update(symbols.filter((x) => x !== s))} aria-label={`הסר ${s}`} className="p-1"><X size={14} /></button>
+      </span>)}
+      <span dir="ltr" className="font-mono-num text-xs text-[var(--fg-dim)]">{symbols.length} / {COMPARE_LIMIT}</span>
+    </div>
+    <section className="panel p-4 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-[var(--fg-muted)]">תשואה מתחילת התקופה המשותפת</h2>
+        <div role="group" aria-label="תקופת ההשוואה" dir="ltr" className="inline-flex gap-1 rounded-lg border p-1">
+          {PERIODS.map((p) => <button key={p.key} onClick={() => update(symbols, p.key)} aria-pressed={period === p.key} className={`rounded-md px-3 py-2 text-xs font-semibold ${period === p.key ? "bg-[var(--accent)] text-white" : "text-[var(--fg-muted)]"}`}>{p.key}</button>)}
         </div>
       </div>
-
-      {/* Overlay chart */}
-      <section className="panel p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--fg-muted)]">
-            שכבת ביצועים מנורמלת
-          </h2>
-          <div className="inline-flex gap-1 rounded-lg border border-[var(--border)] p-0.5">
-            {PERIODS.map((p) => {
-              const on = p.key === period;
-              return (
-                <button
-                  key={p.key}
-                  onClick={() => setPeriod(p.key)}
-                  className="relative rounded-md px-2.5 py-1 text-xs font-semibold transition-colors"
-                  style={{ color: on ? "#fff" : "var(--fg-muted)" }}
-                >
-                  {on && (
-                    <motion.span
-                      layoutId="compare-period-pill"
-                      className="absolute inset-0 rounded-md"
-                      style={{ background: "var(--accent)" }}
-                      transition={SPRING.snappy}
-                    />
-                  )}
-                  <span className="relative z-10">{p.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        {candleResults.some((r) => r.isLoading) && series.length === 0 ? (
-          <Skeleton className="h-[320px] w-full" />
-        ) : (
-          <CompareChart series={series} />
-        )}
-      </section>
-
-      {/* Comparison table */}
-      <section className="panel mt-5 overflow-hidden p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border)] text-start" style={{ color: "var(--fg-muted)" }}>
-                <th className="px-4 py-3 font-medium">סמל</th>
-                <th className="px-4 py-3 text-end font-medium">מחיר</th>
-                <th className="px-4 py-3 text-end font-medium">יומי</th>
-                <th className="px-4 py-3 text-end font-medium">שבועי</th>
-                <th className="px-4 py-3 text-end font-medium">חודשי</th>
-                <th className="px-4 py-3 text-end font-medium">מתחילת השנה</th>
-              </tr>
-            </thead>
-            <tbody>
-              {symbols.map((s, i) => {
-                const q = quoteResults[i].data;
-                const cells: [string, number | undefined][] = [
-                  ["Day", tfPct(i, "Day")],
-                  ["Week", tfPct(i, "Week")],
-                  ["Month", tfPct(i, "Month")],
-                  ["YTD", tfPct(i, "YTD")],
-                ];
-                return (
-                  <tr key={s} className="border-b border-[var(--border)] last:border-0">
-                    <td className="px-4 py-3">
-                      <Link href={`/${encodeURIComponent(s)}`} className="flex items-center gap-2 font-semibold hover:text-white">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
-                        {q?.display ?? s}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-end font-mono-num">
-                      {q ? formatPrice(q.price, q.currency) : <Skeleton className="ms-auto h-4 w-16" />}
-                    </td>
-                    {cells.map(([label, v]) => (
-                      <td key={label} className="px-4 py-3 text-end font-mono-num">
-                        {v == null ? (
-                          <Skeleton className="ms-auto h-4 w-12" />
-                        ) : (
-                          <span
-                            style={{
-                              color:
-                                direction(v) === "up" ? "var(--up)" : direction(v) === "down" ? "var(--down)" : "var(--fg-muted)",
-                            }}
-                          >
-                            {formatPercent(v)}
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <p className="mt-6 text-center text-xs" style={{ color: "var(--fg-dim)" }}>
-        השכבה מבוססת מחדש לסגירה הראשונה של כל סדרה לאורך <span className="font-mono-num">{period}</span> · Yahoo Finance · אינו ייעוץ השקעות.
-      </p>
-    </main>
-  );
+      {failed.length > 0 && <p role="status" className="mb-4 text-xs text-[var(--warn)]">אין נתוני גרף עבור <bdi>{failed.join(", ")}</bdi>. סמלים זמינים מוצגים. אפשר לנסות רענון.</p>}
+      {symbols.length === 0 ? <div className="py-16 text-center"><p>בחרו סמלים להשוואה או התחילו מאחת הקבוצות למעלה.</p></div>
+        : pending ? <Skeleton className="h-[320px] w-full" /> : <CompareChart key={symbols.join(",") + period} series={series} />}
+    </section>
+    {symbols.length > 0 && <section className="panel mt-5 overflow-hidden">
+      <div className="overflow-x-auto"><table className="w-full text-sm">
+        <caption className="sr-only">מחירים ושינויים לתקופות שונות. שינוי התקופה הוא מול תאריך הבסיס המשותף בגרף.</caption>
+        <thead><tr className="border-b bg-[var(--panel-2)] text-[var(--fg-muted)]">
+          <th scope="col" className="px-4 py-3 text-start font-medium">סמל</th>
+          {["מחיר", "בתקופה", "יומי", "שבועי", "חודשי", "מתחילת השנה"].map((text) => <th scope="col" key={text} className="whitespace-nowrap px-4 py-3 text-end font-medium">{text}</th>)}
+        </tr></thead>
+        <tbody>{symbols.map((s, i) => {
+          const q = quoteResults[i].data;
+          const normalized = series.find((x) => x.symbol === s);
+          return <tr key={s} className="border-b last:border-0">
+            <th scope="row" className="px-4 py-4 text-start"><Link href={`/${encodeURIComponent(s)}`} className="flex items-center gap-2 font-semibold hover:text-[var(--accent)]"><span className="h-2 w-2 rounded-full" style={{ background: PALETTE[i] }} /><bdi>{q?.display ?? s}</bdi></Link></th>
+            <td className="px-4 py-4 text-end font-mono-num">{q ? formatPrice(q.price, q.currency) : quoteResults[i].isPending ? <Skeleton className="ms-auto h-4 w-16" /> : "—"}{q && (q.stale || quoteResults[i].isError) && <span className="mt-1 block text-[10px] text-[var(--warn)]">מושהה</span>}</td>
+            <td className="px-4 py-4 text-end">{percentCell(normalized?.points.at(-1)?.value, pending)}</td>
+            {["Day", "Week", "Month", "YTD"].map((label) => <td key={label} className="px-4 py-4 text-end">{percentCell(tfResults[i].data?.rows.find((r) => r.label === label)?.changePct, tfResults[i].isPending)}</td>)}
+          </tr>;
+        })}</tbody>
+      </table></div>
+    </section>}
+    <p className="mx-auto mt-6 max-w-3xl text-center text-xs leading-relaxed text-[var(--fg-muted)]">כל הסדרות מתחילות ב־0% בתאריך המסחר הראשון המשותף ומסתיימות בתאריך האחרון המשותף. הציר מבוסס על תאריכים, כולל סופי שבוע בקריפטו. תשואת מחיר ללא התאמה לדיבידנדים; יומי ושאר הטווחים בטבלה מעוגנים לפתיחת התקופה. Yahoo Finance.</p>
+  </main>;
 }

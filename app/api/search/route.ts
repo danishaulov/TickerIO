@@ -11,6 +11,6 @@ export async function GET(req: NextRequest) {
     const { value } = await cached(`search:${q.toLowerCase()}`, 300, () => searchSymbols(q));
     return NextResponse.json({ hits: value });
   } catch {
-    return NextResponse.json({ hits: [] });
+    return NextResponse.json({ error: "החיפוש אינו זמין כרגע. נסו שוב בעוד רגע." }, { status: 503 });
   }
 }

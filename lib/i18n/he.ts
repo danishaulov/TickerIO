@@ -126,6 +126,12 @@ export const UI = {
   overallGrade: "דירוג כולל",
   whatsGoingOn: "מה קורה עם הנייר",
 
+  // Bottom-line / strengths / risks (scannable summary)
+  bottomLine: "בשורה התחתונה",
+  strengths: "חוזקות",
+  risks: "סיכונים ונקודות למעקב",
+  outOf100: "מתוך 100",
+
   // Generic
   readMore: "קרא עוד",
   showLess: "הצג פחות",

@@ -18,7 +18,7 @@
   /* Text */
   --fg: #eef2fa;
   --fg-muted: #94a1ba;
-  --fg-dim: #5d667e;
+  --fg-dim: #8793ab;
 
   /* Brand / accent */
   --accent: #5b9bff;
@@ -61,7 +61,7 @@
 
   --fg: #0e1626;
   --fg-muted: #4d5d78;
-  --fg-dim: #8593ac;
+  --fg-dim: #64748f;
 
   --accent: #2f6bff;
   --accent-2: #7b4dff;
@@ -118,7 +118,13 @@
 
 html {
   color-scheme: var(--scheme);
+  scroll-padding-top: calc(var(--site-header-height, 100px) + 20px);
 }
+
+.dashboard-section { scroll-margin-top: 16px; }
+.search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.search-results { box-shadow: 0 18px 60px -15px rgba(0, 0, 0, .5); }
+.search-results kbd { font-family: inherit; font-weight: 600; }
 
 body {
   background: var(--bg);
@@ -197,6 +203,8 @@ body {
 }
 
 /* ---------- Panels ---------- */
+/* Utilities must win over component defaults, especially absolute dropdowns. */
+@layer components {
 .panel {
   position: relative;
   background:
@@ -239,6 +247,23 @@ body {
 }
 
 /* ---------- Living background layers ---------- */
+}
+
+@layer components {
+.control {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.control:hover { border-color: var(--border-strong); }
+.control:disabled { opacity: .45; cursor: not-allowed; }
+.control-primary { background: var(--accent); border-color: var(--accent); color: white; }
+}
+
+/* ---------- Living background layers ---------- */
 .bg-grid {
   position: absolute;
   inset: 0;
@@ -269,7 +294,8 @@ body {
   animation: marquee 60s linear infinite;
   will-change: transform;
 }
-.marquee:hover .marquee-track {
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
   animation-play-state: paused;
 }
 @keyframes marquee {

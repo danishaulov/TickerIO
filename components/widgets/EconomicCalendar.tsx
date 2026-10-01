@@ -1,6 +1,7 @@
 "use client";
 
 import type { CalendarEvent } from "@/lib/types";
+import { useEffect, useState } from "react";
 import { UI, impactHe } from "@/lib/i18n/he";
 import { WidgetCard } from "./WidgetCard";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -24,8 +25,14 @@ export function EconomicCalendar({
   source?: string;
   loading: boolean;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const upcoming = (events ?? [])
-    .filter((e) => new Date(e.date).getTime() >= Date.now() - 3600_000)
+    .filter((e) => new Date(e.date).getTime() >= now - 3600_000)
+    .sort((a, b) => Date.parse(a.date) - Date.parse(b.date))
     .slice(0, 6);
 
   return (

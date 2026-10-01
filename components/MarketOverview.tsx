@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { motion } from "motion/react";
 import { MiniTicker } from "./MiniTicker";
 import { useWatchlist } from "@/store/useWatchlist";
@@ -17,8 +17,7 @@ const BELLWETHERS: { symbol: string; label: string }[] = [
 
 export function MarketOverview() {
   const symbols = useWatchlist((s) => s.symbols);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useHydrated();
 
   return (
     <div className="w-full">

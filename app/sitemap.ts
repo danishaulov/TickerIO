@@ -9,6 +9,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
   return [
     { url: BASE, lastModified: now, changeFrequency: "daily", priority: 1 },
+    ...["markets", "screen", "compare"].map((page) => ({
+      url: `${BASE}/${page}`, lastModified: now, changeFrequency: "daily" as const, priority: 0.8,
+    })),
     ...POPULAR.map((s) => ({
       url: `${BASE}/${s}`,
       lastModified: now,

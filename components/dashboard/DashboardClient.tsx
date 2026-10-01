@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import {
   DndContext,
   closestCenter,
   PointerSensor,
+  KeyboardSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import {
   useCalendar,
   useCandles,
@@ -26,6 +28,7 @@ import { useWidgetOrder, reconcileOrder, DEFAULT_ORDER } from "@/store/useWidget
 import { UI } from "@/lib/i18n/he";
 import { Reveal } from "@/components/ui/Reveal";
 import { SortableWidget } from "./SortableWidget";
+import { DashboardNavigation } from "./DashboardNavigation";
 import { PriceHeader } from "@/components/widgets/PriceHeader";
 import { ChartPanel } from "@/components/widgets/ChartPanel";
 import { TimeframePanel } from "@/components/widgets/TimeframePanel";
@@ -68,11 +71,13 @@ export function DashboardClient({ symbol }: { symbol: string }) {
   // hydration mismatch, then switch to the user's saved order.
   const storedOrder = useWidgetOrder((s) => s.order);
   const setOrder = useWidgetOrder((s) => s.setOrder);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useHydrated();
   const order = mounted ? reconcileOrder(storedOrder) : [...DEFAULT_ORDER];
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (over && active.id !== over.id) {
@@ -100,7 +105,7 @@ export function DashboardClient({ symbol }: { symbol: string }) {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
+    <main id="main-content" className="mx-auto w-full max-w-[1400px] px-4 py-5 sm:px-6">
       <Reveal>
         <PriceHeader
           quote={quote}
@@ -110,53 +115,58 @@ export function DashboardClient({ symbol }: { symbol: string }) {
         />
       </Reveal>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_372px]">
+      <DashboardNavigation symbol={symbol} isEquity={isEquity} />
+
+      {!quote && quoteQ.isError ? <section className="panel py-12 text-center">
+        <p className="text-sm text-[var(--fg-muted)]">אפשר לנסות לטעון שוב, או לבחור טיקר אחר בחיפוש למעלה.</p>
+        <button className="control control-primary mt-4" disabled={quoteQ.isFetching} onClick={() => quoteQ.refetch()}>{quoteQ.isFetching ? "טוען…" : "נסה שוב"}</button>
+      </section> : <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_372px]">
         {/* Left — chart, AI, news */}
-        <div className="flex flex-col gap-5">
-          <Reveal delay={0.05}>
+        <div className="flex min-w-0 flex-col gap-5">
+          <section id="chart" aria-label="גרף מחיר" className="dashboard-section min-w-0">
             {quote ? (
               <ChartPanel symbol={quote.symbol} display={quote.display} assetClass={quote.assetClass} />
             ) : (
-              <Skeleton className="h-[620px] w-full rounded-2xl" />
+              <Skeleton className="h-[440px] w-full rounded-2xl sm:h-[620px]" />
             )}
-          </Reveal>
-          <Reveal delay={0.08}>
+          </section>
+          <section id="profile" aria-label="אודות הנכס" className="dashboard-section">
             <AssetProfileCard data={profileQ.data} display={quote?.display ?? symbol} loading={profileQ.isLoading} />
-          </Reveal>
-          <Reveal delay={0.1}>
+          </section>
+          <section id="fundamentals" aria-label="ניתוח פונדמנטלי" className="dashboard-section">
             <FundamentalAnalysis data={fundQ.data} loading={fundQ.isLoading} />
-          </Reveal>
+          </section>
           {isEquity && (
             <Reveal delay={0.12}>
               <PeerComparison data={peersQ.data} loading={peersQ.isLoading} />
             </Reveal>
           )}
-          <Reveal delay={0.15}>
+          <section id="news" aria-label="חדשות" className="dashboard-section">
             <NewsFeed
               symbol={symbol}
               items={newsQ.data?.items}
               sources={newsQ.data?.sources}
               loading={newsQ.isLoading}
             />
-          </Reveal>
+          </section>
         </div>
 
         {/* Right — reorderable widget rail */}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={order} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-5">
+            <aside id="market-data" aria-label="נתונים ומגמות" className="dashboard-section flex min-w-0 flex-col gap-5">
               {order.map((id) => (
                 <SortableWidget key={id} id={id}>
                   {widgetNodes[id]}
                 </SortableWidget>
               ))}
               <p className="text-center text-[11px]" style={{ color: "var(--fg-dim)" }}>
-                {UI.dragHint}
+                סידור הכרטיסים: גררו את הידית, או בחרו בה והשתמשו ברווח ובחצים.
               </p>
-            </div>
+            </aside>
           </SortableContext>
         </DndContext>
-      </div>
+      </div>}
 
       <p className="mt-8 text-center text-xs" style={{ color: "var(--fg-dim)" }}>
         {UI.dataFooter}

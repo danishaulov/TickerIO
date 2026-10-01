@@ -23,7 +23,7 @@ export function SortableWidget({ id, children }: { id: string; children: ReactNo
         {...attributes}
         {...listeners}
         aria-label="גרור לסידור מחדש"
-        className="absolute end-2.5 top-2.5 z-30 grid h-7 w-7 cursor-grab place-items-center rounded-md opacity-0 transition-opacity pointer-events-none group-hover/sortable:pointer-events-auto group-hover/sortable:opacity-100 active:cursor-grabbing"
+        className="absolute end-2.5 top-2.5 z-30 grid h-8 w-8 cursor-grab place-items-center rounded-md opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing sm:opacity-0 sm:group-hover/sortable:opacity-100"
         style={{ background: "var(--panel-2)", touchAction: "none" }}
       >
         <GripVertical size={14} style={{ color: "var(--fg-dim)" }} />

@@ -12,7 +12,7 @@ export function Hero() {
   const reduce = useReducedMotion();
   return (
     <motion.div
-      className="flex flex-col items-center pt-20 text-center sm:pt-28"
+      className="flex flex-col items-center pt-12 text-center sm:pt-16"
       variants={staggerContainer(0.1, 0.05)}
       initial={reduce ? false : "hidden"}
       animate="show"
@@ -59,7 +59,7 @@ export function Hero() {
       </motion.p>
 
       <motion.div variants={fadeUp} className="mt-10 w-full max-w-xl">
-        <TickerSearch size="lg" autoFocus />
+        <TickerSearch size="lg" />
       </motion.div>
     </motion.div>
   );

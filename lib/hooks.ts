@@ -21,6 +21,7 @@ import {
   fetchTrendBias,
 } from "@/lib/api";
 import type { NewsItem } from "@/lib/types";
+import { normalizeSymbol } from "@/lib/symbol-list";
 
 /** Debounce any fast-changing value. */
 export function useDebounced<T>(value: T, ms = 200): T {
@@ -34,18 +35,22 @@ export function useDebounced<T>(value: T, ms = 200): T {
 
 export function useSearch(query: string) {
   const q = useDebounced(query.trim(), 220);
-  return useQuery({
+  const result = useQuery({
     queryKey: ["search", q],
     queryFn: () => fetchSearch(q),
     enabled: q.length >= 1,
     staleTime: 60_000,
   });
+  // Never let Enter select the previous query's results while typing quickly.
+  const current = q === query.trim();
+  return { ...result, data: current ? result.data : undefined, isSearching: !current || result.isFetching };
 }
 
 export function useQuote(symbol: string) {
+  const key = normalizeSymbol(symbol) || symbol;
   return useQuery({
-    queryKey: ["quote", symbol],
-    queryFn: () => fetchQuote(symbol),
+    queryKey: ["quote", key],
+    queryFn: () => fetchQuote(key),
     // Polling is a fallback; usePriceStream pushes live ticks when connected.
     refetchInterval: 30_000,
   });
@@ -75,8 +80,9 @@ export function usePriceStream(symbol: string, enabled = true) {
     es.addEventListener("price", (e) => {
       try {
         const tick = JSON.parse((e as MessageEvent).data) as PriceTick;
-        qc.setQueryData<QuoteResponse>(["quote", symbol], (prev) =>
-          prev
+        if (normalizeSymbol(tick.symbol) !== normalizeSymbol(symbol) || !Number.isFinite(tick.price) || tick.price <= 0 || !Number.isFinite(tick.change) || !Number.isFinite(tick.changePct) || !Number.isFinite(Date.parse(tick.asOf))) return;
+        qc.setQueryData<QuoteResponse>(["quote", normalizeSymbol(symbol) || symbol], (prev) =>
+          prev && Date.parse(tick.asOf) >= Date.parse(prev.asOf)
             ? {
                 ...prev,
                 price: tick.price,
@@ -103,7 +109,7 @@ export function usePriceStream(symbol: string, enabled = true) {
  */
 export function useBatchQuotes(key: string, symbols: string[], enabled = true) {
   return useQuery({
-    queryKey: ["batch-quotes", key],
+    queryKey: ["batch-quotes", key, ...symbols],
     queryFn: () => fetchBatchQuotes(symbols),
     enabled: enabled && symbols.length > 0,
     refetchInterval: 60_000,
@@ -192,7 +198,7 @@ export function useProfile(symbol: string) {
 /** Lazily summarize one article's context — fires only once expanded. */
 export function useArticleSummary(symbol: string, item: NewsItem, enabled: boolean) {
   return useQuery({
-    queryKey: ["article-summary", item.id],
+    queryKey: ["article-summary", symbol, item.id],
     queryFn: () => fetchArticleSummary(symbol, item),
     enabled,
     staleTime: 3_600_000,

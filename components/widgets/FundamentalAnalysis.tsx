@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-import { TrendingUp, Coins, Wallet, ShieldCheck, Newspaper, LineChart, Scale, CalendarClock } from "lucide-react";
+import { TrendingUp, Coins, Wallet, ShieldCheck, Newspaper, LineChart, Scale, CalendarClock, Sparkles, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { FundamentalsResponse, FundPillar, FundMetric, FundBand, FundTrends, FundFairValue, FundEarnings } from "@/lib/api";
 import { UI, marginDirectionHe } from "@/lib/i18n/he";
 
@@ -224,6 +224,66 @@ function FairValueSection({ fv }: { fv: FundFairValue }) {
   );
 }
 
+function SignalList({
+  title, items, tone, Icon,
+}: {
+  title: string; items: string[]; tone: "up" | "down"; Icon: typeof CheckCircle2;
+}) {
+  const color = tone === "up" ? "var(--up)" : "var(--down)";
+  return (
+    <div>
+      <h5 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color }}>
+        <Icon size={14} /> {title}
+      </h5>
+      <ul className="space-y-1.5">
+        {items.map((t, i) => (
+          <li key={i} className="flex gap-2 text-[13px] leading-relaxed text-[var(--fg)]">
+            <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Scannable bottom-line summary: a few takeaway bullets + a strengths/risks split.
+ * The fastest way for a reader to "get" the asset before diving into the pillars.
+ */
+function SummarySection({
+  takeaways, strengths, risks,
+}: {
+  takeaways: string[]; strengths: string[]; risks: string[];
+}) {
+  if (!takeaways.length && !strengths.length && !risks.length) return null;
+  return (
+    <div className="mb-5 rounded-[var(--radius-sm)] border border-[var(--border)] p-4" style={{ background: "var(--panel-2)" }}>
+      {takeaways.length > 0 && (
+        <>
+          <h4 className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-[var(--fg)]">
+            <Sparkles size={15} style={{ color: "var(--accent)" }} /> {UI.bottomLine}
+          </h4>
+          <ul className={`space-y-1.5 ${strengths.length || risks.length ? "mb-4" : ""}`}>
+            {takeaways.map((t, i) => (
+              <li key={i} className="flex gap-2 text-sm leading-relaxed text-[var(--fg)]">
+                <span className="mt-0.5 shrink-0" style={{ color: "var(--accent)" }}>•</span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(strengths.length > 0 || risks.length > 0) && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {strengths.length > 0 && <SignalList title={UI.strengths} items={strengths} tone="up" Icon={CheckCircle2} />}
+          {risks.length > 0 && <SignalList title={UI.risks} items={risks} tone="down" Icon={AlertTriangle} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NewsImpact({ news }: { news: FundamentalsResponse["news"] }) {
   return (
     <div className="mt-5 rounded-[var(--radius-sm)] border border-[var(--border)] p-4" style={{ background: "var(--panel-2)" }}>
@@ -285,6 +345,7 @@ export function FundamentalAnalysis({ data, loading }: { data?: FundamentalsResp
     return (
       <WidgetCard title={UI.fundamentalAnalysis}>
         <p className="mb-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>{UI.degradedNotice}</p>
+        <SummarySection takeaways={data.keyTakeaways} strengths={data.strengths} risks={data.risks} />
         <p className="mb-4 text-sm leading-relaxed text-[var(--fg)]">{data.overview}</p>
         {data.marketRead.length > 0 && (
           <>
@@ -320,6 +381,9 @@ export function FundamentalAnalysis({ data, loading }: { data?: FundamentalsResp
           <p className="text-sm leading-relaxed text-[var(--fg)]">{data.overview}</p>
         </div>
       </div>
+
+      {/* Scannable bottom line + strengths / risks */}
+      <SummarySection takeaways={data.keyTakeaways} strengths={data.strengths} risks={data.risks} />
 
       {/* Pillars 1–4 */}
       <div className="grid gap-4 xl:grid-cols-2">

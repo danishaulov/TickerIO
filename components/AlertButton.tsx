@@ -1,130 +1,73 @@
 "use client";
 
-import { Bell, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Bell, Check, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAlerts } from "@/store/useAlerts";
 import { formatPrice } from "@/lib/format";
+import { useHydrated } from "@/lib/use-hydrated";
+import { normalizeSymbol } from "@/lib/symbol-list";
 
-export function AlertButton({
-  symbol,
-  price,
-  currency = "USD",
-}: {
-  symbol: string;
-  price: number;
-  currency?: string;
-}) {
+export function AlertButton({ symbol, price, currency = "USD" }: { symbol: string; price: number; currency?: string }) {
   const add = useAlerts((s) => s.add);
   const remove = useAlerts((s) => s.remove);
   const all = useAlerts((s) => s.alerts);
   const [open, setOpen] = useState(false);
   const [op, setOp] = useState<"above" | "below">("above");
   const [value, setValue] = useState("");
-  const [mounted, setMounted] = useState(false);
+  const [message, setMessage] = useState("");
+  const mounted = useHydrated();
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => setMounted(true), []);
-  useEffect(() => {
-    if (open && !value) setValue(price ? String(+price.toFixed(price >= 1 ? 2 : 4)) : "");
-  }, [open, price, value]);
+  const id = useId();
 
   useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    if (open) document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    if (!open) return;
+    function outside(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    function escape(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, [open]);
+  const mine = mounted ? all.filter((a) => a.symbol === normalizeSymbol(symbol)) : [];
+  const valid = value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) > 0;
 
-  const mine = mounted ? all.filter((a) => a.symbol === symbol.toUpperCase()) : [];
-
+  function toggle() {
+    if (!open) {
+      setValue(Number.isFinite(price) && price > 0 ? String(+(price * 1.05).toFixed(price >= 1 ? 2 : 6)) : "");
+      setOp("above");
+      setMessage("");
+    }
+    setOpen(!open);
+  }
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const num = parseFloat(value);
-    if (!isFinite(num) || num <= 0) return;
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-    add(symbol, op, num);
-    setValue("");
-    setOp(num >= price ? "above" : "below");
+    if (!valid) { setMessage("הזינו מחיר חיובי ותקין."); return; }
+    const added = add(symbol, op, Number(value), currency);
+    setMessage(added ? "ההתראה נשמרה. נעדכן כשהמחיר יגיע ליעד." : "ההתראה כבר קיימת או שהגעתם למגבלת 50 התראות.");
+    if (added) setValue("");
   }
 
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="relative grid h-9 w-9 place-items-center rounded-lg border transition-colors hover:border-[var(--border-strong)]"
-        style={{ borderColor: "var(--border)" }}
-        title="התראות מחיר"
-        aria-label="התראות מחיר"
-      >
-        <Bell size={17} style={{ color: mine.length ? "var(--accent)" : "var(--fg-dim)" }} fill={mine.length ? "var(--accent)" : "none"} />
-        {mine.length > 0 && (
-          <span
-            className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-bold text-white"
-            style={{ background: "var(--accent)" }}
-          >
-            {mine.length}
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div
-          className="panel absolute end-0 z-50 mt-2 w-64 p-3"
-          style={{ boxShadow: "0 24px 48px -20px rgba(0,0,0,0.9)" }}
-        >
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--fg-muted)" }}>
-            התרע לי כש-{symbol}
-          </div>
-          <form onSubmit={submit} className="space-y-2">
-            <div className="flex gap-1 rounded-lg border p-1" style={{ borderColor: "var(--border)" }}>
-              {(["above", "below"] as const).map((o) => (
-                <button
-                  key={o}
-                  type="button"
-                  onClick={() => setOp(o)}
-                  className="flex-1 rounded-md py-1 text-xs font-semibold transition-colors"
-                  style={op === o ? { background: "var(--panel-2)", color: "var(--fg)" } : { color: "var(--fg-dim)" }}
-                >
-                  {o === "above" ? "מעל" : "מתחת"}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                inputMode="decimal"
-                placeholder="מחיר"
-                className="w-full rounded-lg border bg-[var(--panel-2)] px-2.5 py-1.5 font-mono-num text-sm outline-none focus:border-[var(--accent)]"
-              />
-              <button type="submit" className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90">
-                הגדר
-              </button>
-            </div>
-          </form>
-
-          {mine.length > 0 && (
-            <ul className="mt-3 space-y-1 border-t border-[var(--border)] pt-2">
-              {mine.map((a) => (
-                <li key={a.id} className="flex items-center justify-between text-xs">
-                  <span style={{ color: "var(--fg-muted)" }}>
-                    {a.op === "above" ? "מעל" : "מתחת"} <span className="font-mono-num text-[var(--fg)]">{formatPrice(a.price, currency)}</span>
-                  </span>
-                  <button onClick={() => remove(a.id)} aria-label="הסר התראה">
-                    <X size={13} style={{ color: "var(--fg-dim)" }} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2 text-[10px]" style={{ color: "var(--fg-dim)" }}>
-            מתריע כל עוד TickerIO פתוח.
-          </p>
+  return <div className="relative" ref={ref}>
+    <button onClick={toggle} className="relative grid h-9 w-9 place-items-center rounded-lg border hover:border-[var(--border-strong)]"
+      title="התראות מחיר" aria-label={`התראות מחיר עבור ${symbol}`} aria-expanded={open} aria-controls={id}>
+      <Bell size={17} className={mine.length ? "text-[var(--accent)]" : "text-[var(--fg-muted)]"} />
+      {mine.length > 0 && <span className="absolute -end-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">{mine.length}</span>}
+    </button>
+    {open && <div id={id} role="dialog" aria-label={`התראת מחיר עבור ${symbol}`} className="panel absolute end-0 z-50 mt-2 w-[min(288px,85vw)] p-4">
+      <div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold">התראה עבור <bdi>{symbol}</bdi></p><button onClick={() => setOpen(false)} aria-label="סגור הגדרת התראה"><X size={15} /></button></div>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="flex gap-1 rounded-lg border p-1">
+          {(["above", "below"] as const).map((o) => <button key={o} type="button" onClick={() => setOp(o)} aria-pressed={op === o} className={`flex-1 rounded-md py-2 text-xs font-semibold ${op === o ? "bg-[var(--panel-2)] text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}>{o === "above" ? "מעל המחיר" : "מתחת למחיר"}</button>)}
         </div>
-      )}
-    </div>
-  );
+        <label htmlFor={`${id}-price`} className="block text-xs text-[var(--fg-muted)]">מחיר יעד ({currency})</label>
+        <input id={`${id}-price`} autoFocus value={value} onChange={(e) => { setValue(e.target.value); setMessage(""); }} inputMode="decimal" dir="ltr" placeholder="0.00" className="control font-mono-num w-full" />
+        <button type="submit" disabled={!valid} className="control control-primary w-full">שמור התראה</button>
+      </form>
+      {message && <p role="status" className="mt-3 flex gap-2 text-xs text-[var(--fg-muted)]"><Check size={14} className="shrink-0" />{message}</p>}
+      {mine.length > 0 && <ul className="mt-3 space-y-2 border-t pt-3">{mine.map((a) => <li key={a.id} className="flex items-center justify-between text-xs">
+        <span>{a.op === "above" ? "מעל" : "מתחת"} <span className="font-mono-num">{formatPrice(a.price, a.currency ?? currency)}</span></span>
+        <button onClick={() => remove(a.id)} aria-label={`הסר התראה ${a.price}`} className="p-1"><X size={14} /></button>
+      </li>)}</ul>}
+      <p className="mt-3 text-[11px] leading-relaxed text-[var(--fg-muted)]">התראות פועלות כשהאתר פתוח ונתון עדכני זמין. התראות שהופעלו נשמרות בהיסטוריה.</p>
+    </div>}
+  </div>;
 }

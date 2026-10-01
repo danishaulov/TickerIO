@@ -12,8 +12,10 @@ import type {
 } from "@/lib/types";
 
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  const json = await res.json();
+  const res = await fetch(url, { signal: AbortSignal.timeout(75_000) });
+  const json = await res.json().catch(() => {
+    throw new Error("השרת לא החזיר נתונים תקינים. נסו שוב בעוד רגע.");
+  });
   if (!res.ok) throw new Error((json as { error?: string }).error ?? `Request failed: ${res.status}`);
   return json as T;
 }
@@ -145,6 +147,12 @@ export interface FundamentalsResponse {
   compositeBand: FundBand | null;
   compositeWord: string | null;
   overview: string;
+  /** Scannable one-line bottom-line bullets (the TL;DR). Always present, may be empty. */
+  keyTakeaways: string[];
+  /** Concrete positives grounded in the numbers (green). */
+  strengths: string[];
+  /** Concrete risks / watch-points grounded in the numbers (red/amber). */
+  risks: string[];
   pillars: FundPillar[];
   marketRead: FundMetric[];
   trends: FundTrends | null;

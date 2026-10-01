@@ -1,6 +1,5 @@
 import { MarketOverview } from "@/components/MarketOverview";
-import { TickerTape } from "@/components/TickerTape";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { SiteHeader } from "@/components/SiteHeader";
 import { Hero } from "@/components/landing/Hero";
 import { QuickAccess } from "@/components/landing/QuickAccess";
 import { MoversStrip } from "@/components/landing/MoversStrip";
@@ -9,23 +8,19 @@ import { FeatureGrid } from "@/components/landing/FeatureGrid";
 export default function Home() {
   return (
     <main className="flex min-h-screen flex-col">
-      <TickerTape />
-
-      <div className="mx-auto flex w-full max-w-[1120px] justify-end px-4 pt-4 sm:px-6">
-        <ThemeToggle />
-      </div>
+      <SiteHeader showSearch={false} />
 
       <div className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col items-center px-4 sm:px-6">
         {/* Hero */}
         <Hero />
 
         {/* Jump straight into the app */}
-        <div className="mt-16 w-full">
+        <div className="mt-10 w-full">
           <QuickAccess />
         </div>
 
         {/* Live market overview */}
-        <div className="mt-20 w-full">
+        <div className="mt-12 w-full">
           <MarketOverview />
         </div>
 

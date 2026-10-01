@@ -18,7 +18,7 @@ export function ChartPanel({
   assetClass: AssetClass;
 }) {
   return (
-    <section dir="ltr" className="panel h-[620px] overflow-hidden p-0">
+    <section dir="ltr" aria-label={`גרף מחיר ${display}`} className="panel h-[440px] overflow-hidden p-0 sm:h-[620px]">
       <TradingViewChart symbol={symbol} display={display} assetClass={assetClass} interval="D" />
     </section>
   );

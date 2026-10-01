@@ -1,28 +1,30 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EASE, SPRING } from "@/lib/motion";
 
 type Theme = "dark" | "light";
+const themeSnapshot = (): Theme => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+const serverTheme = (): Theme => "dark";
+function subscribeTheme(callback: () => void) {
+  window.addEventListener("tickerio-theme-change", callback);
+  return () => window.removeEventListener("tickerio-theme-change", callback);
+}
 
 /** Toggles the "Daylight" light theme. Initial theme is applied pre-paint by an
  *  inline script in the layout, so there's no flash. The icon swaps with a
  *  spin/scale crossfade. */
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const theme = useSyncExternalStore(subscribeTheme, themeSnapshot, serverTheme);
   const reduce = useReducedMotion();
-
-  useEffect(() => {
-    setTheme((document.documentElement.dataset.theme as Theme) || "dark");
-  }, []);
 
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
     if (next === "light") document.documentElement.dataset.theme = "light";
     else delete document.documentElement.dataset.theme;
+    window.dispatchEvent(new Event("tickerio-theme-change"));
     try {
       localStorage.setItem("tickerio-theme", next);
     } catch {

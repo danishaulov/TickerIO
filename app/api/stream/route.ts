@@ -1,73 +1,51 @@
 import { NextRequest } from "next/server";
 import { quote } from "@/lib/market";
+import { normalizeSymbol } from "@/lib/symbol-list";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/**
- * Server-Sent Events price stream. Emits a price tick every few seconds for ~45s,
- * then closes — the browser's EventSource auto-reconnects, giving a continuous
- * live feed that stays within serverless function limits (CLAUDE.md §6/§Phase 9).
- */
+/** Bound each SSE connection and release every timer on disconnect. */
 export async function GET(req: NextRequest) {
-  const symbol = req.nextUrl.searchParams.get("symbol");
-  if (!symbol) return new Response("symbol required", { status: 400 });
-
+  const symbol = normalizeSymbol(req.nextUrl.searchParams.get("symbol") ?? "");
+  if (!symbol) return new Response("valid symbol required", { status: 400 });
   const encoder = new TextEncoder();
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let stop = () => {};
 
   const stream = new ReadableStream({
-    async start(controller) {
-      const send = (event: string, data: unknown) => {
-        try {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-        } catch {
-          /* controller closed */
-        }
-      };
-
-      // Ask the browser to reconnect quickly after we close.
-      controller.enqueue(encoder.encode("retry: 2000\n\n"));
-
-      const started = Date.now();
+    start(controller) {
       let stopped = false;
-      const stop = () => {
+      let busy = false;
+      stop = () => {
         if (stopped) return;
         stopped = true;
-        if (timer) clearInterval(timer);
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
+        clearInterval(interval);
+        clearTimeout(deadline);
+        req.signal.removeEventListener("abort", stop);
+        try { controller.close(); } catch { /* already closed */ }
       };
-
-      req.signal.addEventListener("abort", stop);
-
       const tick = async () => {
-        if (stopped) return;
-        if (Date.now() - started > 45_000) return stop();
+        if (stopped || busy) return;
+        busy = true;
         try {
           const { value, stale } = await quote(symbol);
-          send("price", {
-            symbol: value.symbol,
-            price: value.price,
-            change: value.change,
-            changePct: value.changePct,
-            asOf: value.asOf,
-            stale,
-          });
-        } catch {
-          /* skip this tick */
-        }
+          if (!stopped) {
+            controller.enqueue(encoder.encode(`event: price\ndata: ${JSON.stringify({
+              symbol: value.symbol, price: value.price, change: value.change,
+              changePct: value.changePct, asOf: value.asOf, stale,
+            })}\n\n`));
+          }
+        } catch { /* polling is the client fallback */ }
+        finally { busy = false; }
       };
-
-      await tick();
-      timer = setInterval(tick, 5000);
+      const deadline = setTimeout(stop, 45_000);
+      const interval = setInterval(() => void tick(), 5000);
+      req.signal.addEventListener("abort", stop, { once: true });
+      if (req.signal.aborted) { stop(); return; }
+      controller.enqueue(encoder.encode("retry: 2000\n\n"));
+      void tick();
     },
-    cancel() {
-      if (timer) clearInterval(timer);
-    },
+    cancel() { stop(); },
   });
 
   return new Response(stream, {

@@ -107,7 +107,7 @@ export async function searchSymbols(query: string): Promise<SearchHit[]> {
     )
     .map((x) => ({
       symbol: x.symbol!,
-      name: x.shortname ?? x.longname ?? x.symbol!,
+      name: x.longname ?? x.shortname ?? x.symbol!,
       type: x.typeDisp ?? x.quoteType ?? "",
       exchange: x.exchDisp ?? "",
       quoteType: x.quoteType ?? "",

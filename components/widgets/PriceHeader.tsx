@@ -4,7 +4,6 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import type { QuoteResponse } from "@/lib/api";
 import { formatPrice, formatPercent, formatSignedPrice, direction } from "@/lib/format";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
-import { LivePulse } from "@/components/ui/LivePulse";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { WatchStar } from "@/components/WatchStar";
 import { AlertButton } from "@/components/AlertButton";
@@ -32,7 +31,7 @@ export function PriceHeader({
     );
   }
 
-  if (error || !quote) {
+  if (!quote) {
     return (
       <section className="panel p-6">
         <h1 className="text-2xl font-bold">{UI.couldntLoadSymbol}</h1>
@@ -50,23 +49,23 @@ export function PriceHeader({
   const currency = quote.currency || "USD";
 
   return (
-    <section className="panel p-6">
+    <section className="panel p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="font-display text-4xl font-extrabold tracking-tight">{quote.display}</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 dir="ltr" className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">{quote.display}</h1>
             <span
               className="rounded-md border px-2 py-0.5 text-xs font-semibold tracking-wide text-[var(--fg-muted)]"
               style={{ borderColor: "var(--border-strong)" }}
             >
               {assetClassHe(quote.assetClass)}
             </span>
-            {quote.stale ? (
+            {quote.stale || error ? (
               <span className="text-xs font-semibold" style={{ color: "var(--warn)" }}>
                 {UI.delayed}
               </span>
             ) : (
-              <LivePulse color={color} label={UI.live} />
+              <span className="text-xs font-medium text-[var(--fg-muted)]">מחיר אחרון</span>
             )}
           </div>
           <p className="mt-1 text-sm text-[var(--fg-muted)]">
@@ -74,11 +73,11 @@ export function PriceHeader({
             {quote.exchange ? ` · ${quote.exchange}` : ""}
           </p>
 
-          <div className="mt-4 flex items-end gap-3">
+          <div className="mt-4 flex flex-wrap items-end gap-3">
             <AnimatedNumber
               value={quote.price}
               format={(n) => formatPrice(n, currency)}
-              className="font-mono-num text-4xl font-semibold leading-none"
+              className="font-mono-num text-3xl font-semibold leading-none sm:text-4xl"
             />
             <div dir="ltr" className="flex items-center gap-2 pb-1" style={{ color }}>
               <span className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold tabular" style={{ background: up ? "var(--up-soft)" : "var(--down-soft)" }}>
@@ -93,13 +92,13 @@ export function PriceHeader({
           </p>
         </div>
 
-        <div className="ms-auto flex items-center gap-4">
+        <div className="ms-auto flex min-w-0 max-w-full items-center gap-3">
           {spark.length > 1 ? (
-            <span dir="ltr">
+            <span dir="ltr" className="min-w-0 w-40 sm:w-64 [&_svg]:w-full">
               <Sparkline data={spark} up={up} width={260} height={64} />
             </span>
           ) : (
-            <Skeleton className="h-16 w-64" />
+            <Skeleton className="h-16 w-40 sm:w-64" />
           )}
           <AlertButton symbol={quote.symbol} price={quote.price} currency={currency} />
           <WatchStar symbol={quote.symbol} />

@@ -126,6 +126,9 @@ function strengthForwardMetrics(f: Fundamentals): FundMetric[] {
 // --------------------------- LLM context + prompt ---------------------------
 interface LlmOut {
   overall?: string;
+  keyTakeaways?: unknown;
+  strengths?: unknown;
+  risks?: unknown;
   pillars?: Record<string, string>;
   news?: { lean?: string; text?: string };
 }
@@ -225,10 +228,14 @@ function buildPrompt(ctx: object): string {
     `- Reflect each grade's tone (מצוין/טוב = חיובי, סביר = מעורב, חלש/חלש מאוד = זהירות), but stay descriptive, never prescriptive. Weave the relevant "notes" caveats in.\n` +
     `- If pillars is null (crypto/forex/index), set "pillars" to {} and base "overall" only on market data, the technical/Fear&Greed bias, and the news.\n\n` +
     `OUTPUT — return ONLY this JSON object, no markdown, no preamble:\n` +
-    `{\n  "overall": "<4-7 Hebrew sentences: the current situation + forward outlook, combining the grades, valuation, growth, technical/Fear&Greed bias, and what the news implies>",\n` +
+    `{\n  "keyTakeaways": ["<2-4 VERY short Hebrew bullets — the bottom line a reader gets in 5 seconds: the overall grade, the valuation stance (זול/הוגן/יקר), the growth/momentum picture, and the single biggest risk. Each ≤ 12 words, no trailing period. Concrete and specific to THIS asset>"],\n` +
+    `  "strengths": ["<2-4 short Hebrew bullets — concrete POSITIVES grounded in the numbers (e.g. high margins, fast growth, net-cash balance sheet, strong FCF). Each ≤ 14 words>"],\n` +
+    `  "risks": ["<2-4 short Hebrew bullets — concrete RISKS / watch-points grounded in the numbers (e.g. rich valuation, decelerating revenue, high leverage, cash burn, upcoming earnings). Each ≤ 14 words>"],\n` +
+    `  "overall": "<4-7 Hebrew sentences: the current situation + forward outlook, combining the grades, valuation, growth, technical/Fear&Greed bias, and what the news implies>",\n` +
     `  "pillars": {\n    "profitability": "<1-2 Hebrew sentences grounded in the numbers>",\n    "valuation": "<1-2 Hebrew sentences>",\n    "cashFlow": "<1-2 Hebrew sentences>",\n    "financialStrength": "<1-2 Hebrew sentences covering balance-sheet strength AND the forward/analyst data>"\n  },\n` +
     `  "news": { "lean": "Bullish|Bearish|Neutral", "text": "<3-5 Hebrew sentences: what the news means fundamentally for the asset>" }\n}\n` +
-    `Include in "pillars" only the keys present in CONTEXT.pillars. "lean" must be exactly one of the three English words.\n\n` +
+    `Include in "pillars" only the keys present in CONTEXT.pillars. "lean" must be exactly one of the three English words. ` +
+    `For "keyTakeaways"/"strengths"/"risks": derive ONLY from CONTEXT; if pillars is null (crypto/forex/index) base them on market data, the technical/Fear&Greed bias and the news, and "strengths"/"risks" may be shorter or empty.\n\n` +
     `CONTEXT:\n${JSON.stringify(ctx)}`
   );
 }
@@ -272,6 +279,127 @@ function overviewFallback(args: {
     `המגמה הטכנית “${biasLabelHe(args.bias)}” ומדד הפחד והחמדנות ${args.fg} (${fgLabelHe(args.fg)})${upTxt ? `, עם ${upTxt}` : ""}.`,
     `הנתונים מבוססים על Yahoo Finance ואינם מהווים ייעוץ השקעות.`,
   ].join(" ");
+}
+
+// --------------------------- strengths / risks / takeaways (deterministic) ---------------------------
+// A grounded, numbers-first fallback so the scannable summary is genuinely useful
+// even when no LLM is configured. The LLM, when present, may replace these with
+// nicer prose — but it works from the same CONTEXT, so the substance matches.
+interface Signal { text: string; prio: number }
+
+function deriveSignals(
+  f: Fundamentals,
+  scores: ReturnType<typeof scoreFundamentals>,
+  extra: {
+    analystUpsidePct: number | null;
+    fairUpsidePct: number | null;
+    netCash: number | null;
+    netDebtEbitda: number | null;
+    marginDirection: "expanding" | "stable" | "contracting" | null;
+  },
+): { strengths: string[]; risks: string[] } {
+  const S: Signal[] = [];
+  const R: Signal[] = [];
+
+  // Profitability
+  if (has(f.profitMargin)) {
+    if (f.profitMargin >= 0.15) S.push({ text: `רווחיות גבוהה — שולי רווח נקי של ${fmtPct(f.profitMargin)}`, prio: 8 });
+    else if (f.profitMargin < 0) R.push({ text: `הפסדית — שולי רווח נקי שליליים (${fmtPct(f.profitMargin)})`, prio: 9 });
+  }
+  if (has(f.grossMargin) && f.grossMargin >= 0.5) S.push({ text: `שולי רווח גולמי רחבים (${fmtPct(f.grossMargin)}) — כוח תמחור חזק`, prio: 5 });
+  if (has(f.returnOnEquity) && f.returnOnEquity >= 0.18 && !(has(f.debtToEquity) && f.debtToEquity > 200))
+    S.push({ text: `תשואה גבוהה על ההון (ROE ${fmtPct(f.returnOnEquity)})`, prio: 6 });
+
+  // Growth
+  if (has(f.revenueGrowth)) {
+    if (f.revenueGrowth >= 0.15) S.push({ text: `צמיחת הכנסות מהירה של ${fmtSignedPct(f.revenueGrowth)}`, prio: 8 });
+    else if (f.revenueGrowth < -0.02) R.push({ text: `הכנסות מתכווצות (${fmtSignedPct(f.revenueGrowth)})`, prio: 8 });
+  }
+  if (has(f.earningsGrowth)) {
+    if (f.earningsGrowth >= 0.2) S.push({ text: `צמיחת רווח חזקה (${fmtSignedPct(f.earningsGrowth)})`, prio: 6 });
+    else if (f.earningsGrowth < -0.05) R.push({ text: `הרווח נשחק (${fmtSignedPct(f.earningsGrowth)})`, prio: 7 });
+  }
+
+  // Cash flow
+  if (has(f.freeCashflow)) {
+    if (f.freeCashflow < 0) R.push({ text: `תזרים מזומנים חופשי שלילי — החברה שורפת מזומנים`, prio: 9 });
+    else if (has(f.totalRevenue) && f.totalRevenue > 0 && f.freeCashflow / f.totalRevenue >= 0.1)
+      S.push({ text: `תזרים חופשי איתן — ${fmtPct(f.freeCashflow / f.totalRevenue)} מההכנסות`, prio: 7 });
+  }
+
+  // Balance sheet
+  if (extra.netCash != null && extra.netCash > 0)
+    S.push({ text: `מאזן איתן — מזומן נטו של ${fmtMoney(extra.netCash, f.currency)}`, prio: 6 });
+  if (has(f.debtToEquity)) {
+    if (f.debtToEquity < 0) R.push({ text: `הון עצמי שלילי במאזן`, prio: 8 });
+    else if (f.debtToEquity > 200) R.push({ text: `מינוף גבוה — יחס חוב להון ${f.debtToEquity.toFixed(0)}%`, prio: 7 });
+    else if (f.debtToEquity < 40) S.push({ text: `מינוף נמוך (חוב להון ${f.debtToEquity.toFixed(0)}%)`, prio: 4 });
+  }
+  if (extra.netDebtEbitda != null && extra.netDebtEbitda > 4)
+    R.push({ text: `חוב כבד — פי ${extra.netDebtEbitda.toFixed(1)} מה-EBITDA`, prio: 6 });
+  if (has(f.currentRatio) && f.currentRatio < 1)
+    R.push({ text: `נזילות מתוחה — יחס שוטף ${fmtRatio(f.currentRatio)}`, prio: 5 });
+
+  // Valuation stance (from the deterministic pillar band)
+  const vb = scores.valuation.band;
+  const peTxt = has(f.trailingPE) && f.trailingPE > 0 ? ` — מכפיל רווח ${fmtRatio(f.trailingPE)}` : "";
+  if (vb === "excellent" || vb === "good") S.push({ text: `תמחור אטרקטיבי${peTxt}`, prio: 5 });
+  else if (vb === "weak" || vb === "poor") R.push({ text: `תמחור מתוח${peTxt}`, prio: 6 });
+
+  // Multi-year trend
+  if (extra.marginDirection === "expanding") S.push({ text: `מרווחי הרווח מתרחבים לאורך זמן`, prio: 4 });
+  else if (extra.marginDirection === "contracting") R.push({ text: `מרווחי הרווח מתכווצים לאורך זמן`, prio: 5 });
+
+  // Analyst consensus / forward
+  if (extra.analystUpsidePct != null) {
+    if (extra.analystUpsidePct >= 10) S.push({ text: `יעד האנליסטים גבוה ב-${extra.analystUpsidePct.toFixed(0)}% מהמחיר`, prio: 4 });
+    else if (extra.analystUpsidePct <= -5) R.push({ text: `המחיר מעל יעד האנליסטים הממוצע (${extra.analystUpsidePct.toFixed(0)}%)`, prio: 4 });
+  }
+  const rec = recommendationHe(f.recommendationKey);
+  if (rec && /קנייה/.test(rec)) S.push({ text: `קונצנזוס אנליסטים: ${rec}`, prio: 3 });
+  else if (rec && /מכירה/.test(rec)) R.push({ text: `קונצנזוס אנליסטים: ${rec}`, prio: 4 });
+
+  // DCF fair value gap
+  if (extra.fairUpsidePct != null) {
+    if (extra.fairUpsidePct <= -15) R.push({ text: `מודל השווי ההוגן מצביע על תמחור יתר (${extra.fairUpsidePct.toFixed(0)}%)`, prio: 3 });
+    else if (extra.fairUpsidePct >= 15) S.push({ text: `מודל השווי ההוגן מצביע על מרווח ביטחון (+${extra.fairUpsidePct.toFixed(0)}%)`, prio: 3 });
+  }
+
+  const finish = (arr: Signal[]) =>
+    [...new Set(arr.sort((a, b) => b.prio - a.prio).map((s) => s.text))].slice(0, 4);
+  return { strengths: finish(S), risks: finish(R) };
+}
+
+function deriveTakeaways(args: {
+  degraded: boolean; compositeScore: number | null; compositeWord: string | null;
+  bias: number; fg: number; dayChangePct: number; strengths: string[]; risks: string[];
+}): string[] {
+  if (args.degraded) {
+    const dir = args.dayChangePct >= 0 ? `+${args.dayChangePct.toFixed(2)}%` : `${args.dayChangePct.toFixed(2)}%`;
+    return [
+      `מגמה טכנית “${biasLabelHe(args.bias)}” ומדד פחד/חמדנות ${args.fg} (${fgLabelHe(args.fg)}).`,
+      `שינוי יומי ${dir}. לנכס זה אין דוחות פונדמנטליים — הקריאה מבוססת שוק וחדשות.`,
+    ];
+  }
+  const t: string[] = [];
+  if (args.compositeWord)
+    t.push(`דירוג פונדמנטלי כולל “${args.compositeWord}”${args.compositeScore != null ? ` (${args.compositeScore}/100)` : ""}.`);
+  if (args.strengths.length) t.push(`עיקר החוזק: ${args.strengths[0]}.`);
+  if (args.risks.length) t.push(`עיקר הסיכון: ${args.risks[0]}.`);
+  t.push(`מגמה טכנית “${biasLabelHe(args.bias)}” · פחד/חמדנות ${args.fg} (${fgLabelHe(args.fg)}).`);
+  return t.slice(0, 4);
+}
+
+/** Accept an LLM string[] only when it carries real content; else use the fallback. */
+function pickArr(a: unknown, fallback: string[]): string[] {
+  if (Array.isArray(a)) {
+    const clean = a
+      .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      .map((x) => x.trim())
+      .slice(0, 4);
+    if (clean.length) return clean;
+  }
+  return fallback;
 }
 
 // --------------------------- builder ---------------------------
@@ -383,9 +511,10 @@ async function build(symbolInput: string): Promise<FundamentalsResponse> {
       : null,
   };
 
-  // Hebrew is token-dense; give the merged narrative room so it isn't truncated
-  // (a cut-off JSON would collapse the whole answer to the heuristic).
-  const llm = await llmJson<LlmOut>(buildPrompt(ctx), 2000).catch(() => null);
+  // Hebrew is token-dense; give the merged narrative (now incl. takeaways +
+  // strengths/risks) room so it isn't truncated — a cut-off JSON would collapse
+  // the whole answer to the heuristic.
+  const llm = await llmJson<LlmOut>(buildPrompt(ctx), 2600).catch(() => null);
 
   // News section
   const rawLean = llm?.value.news?.lean;
@@ -405,6 +534,32 @@ async function build(symbolInput: string): Promise<FundamentalsResponse> {
     });
 
   const generatedBy = llm ? llm.by : "heuristic";
+
+  // Scannable summary — bottom line + strengths/risks. LLM prose when available,
+  // otherwise a grounded deterministic read of the same numbers.
+  const netCash = has(f.totalCash) && has(f.totalDebt) ? f.totalCash - f.totalDebt : null;
+  const analystUpsidePct =
+    has(f.targetMeanPrice) && has(f.currentPrice) && f.currentPrice > 0
+      ? ((f.targetMeanPrice - f.currentPrice) / f.currentPrice) * 100
+      : null;
+  const signals = degraded
+    ? { strengths: [] as string[], risks: [] as string[] }
+    : deriveSignals(f, scores, {
+        analystUpsidePct,
+        fairUpsidePct: fairValue?.upsidePct ?? null,
+        netCash,
+        netDebtEbitda,
+        marginDirection: trends?.marginDirection ?? null,
+      });
+  const strengths = pickArr(llm?.value.strengths, signals.strengths);
+  const risks = pickArr(llm?.value.risks, signals.risks);
+  const keyTakeaways = pickArr(
+    llm?.value.keyTakeaways,
+    deriveTakeaways({
+      degraded, compositeScore: composite.score, compositeWord: composite.word,
+      bias, fg, dayChangePct: q.changePct, strengths, risks,
+    }),
+  );
 
   // Pillars (equities only)
   let pillars: FundPillar[] = [];
@@ -461,6 +616,9 @@ async function build(symbolInput: string): Promise<FundamentalsResponse> {
     compositeBand: scores.composite.band,
     compositeWord: composite.word,
     overview,
+    keyTakeaways,
+    strengths,
+    risks,
     pillars,
     marketRead,
     trends,

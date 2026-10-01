@@ -2,8 +2,8 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
-import { Search, Star, CornerDownLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Search, Star, CornerDownLeft, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearch } from "@/lib/hooks";
 import { useWatchlist } from "@/store/useWatchlist";
 import { useRecents } from "@/store/useRecents";
@@ -14,6 +14,9 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  const close = useCallback(() => { setOpen(false); setQuery(""); setActive(0); }, []);
   const watchSymbols = useWatchlist((s) => s.symbols);
   const recents = useRecents((s) => s.recents);
   const pushRecent = useRecents((s) => s.push);
@@ -24,20 +27,23 @@ export function CommandPalette() {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        previousFocus.current = document.activeElement as HTMLElement;
+        setQuery("");
+        setActive(0);
         setOpen((o) => !o);
       } else if (e.key === "Escape") {
-        setOpen(false);
+        close();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [close]);
 
   useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setActive(0);
-    }
+    if (!open) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = overflow; previousFocus.current?.focus(); };
   }, [open]);
 
   const hits: SearchHit[] = data?.hits ?? [];
@@ -56,8 +62,9 @@ export function CommandPalette() {
   }
 
   function go(symbol: string) {
-    setOpen(false);
-    const clean = symbol.toUpperCase();
+    close();
+    const clean = symbol.trim().toUpperCase();
+    if (!clean) return;
     pushRecent(clean);
     router.push(`/${encodeURIComponent(clean)}`);
   }
@@ -89,9 +96,22 @@ export function CommandPalette() {
           <div
             className="absolute inset-0"
             style={{ background: "rgba(2,4,8,0.6)", backdropFilter: "blur(4px)" }}
-            onClick={() => setOpen(false)}
+            onClick={close}
           />
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="חיפוש מהיר"
+            onKeyDown={(e) => {
+              if (e.key !== "Tab") return;
+              const controls = dialogRef.current?.querySelectorAll<HTMLElement>('input, button:not([tabindex="-1"])');
+              if (!controls?.length) return;
+              const first = controls[0];
+              const last = controls[controls.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }}
             className="panel relative z-10 w-full max-w-xl overflow-hidden p-0"
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -101,6 +121,7 @@ export function CommandPalette() {
             <div className="flex items-center gap-3 border-b border-[var(--border)] px-4">
               <Search size={18} style={{ color: "var(--fg-dim)" }} />
               <input
+                aria-label="חיפוש מהיר לפי סמל או שם"
                 autoFocus
                 value={query}
                 onChange={(e) => {
@@ -113,7 +134,8 @@ export function CommandPalette() {
                 autoComplete="off"
                 className="w-full bg-transparent py-4 text-base outline-none placeholder:text-[var(--fg-dim)]"
               />
-              <kbd className="rounded border px-1.5 py-0.5 text-[10px] text-[var(--fg-dim)]" style={{ borderColor: "var(--border-strong)" }}>
+              <button onClick={close} aria-label="סגור חיפוש" className="p-2"><X size={17} /></button>
+              <kbd aria-hidden="true" className="rounded border px-1.5 py-0.5 text-[10px] text-[var(--fg-dim)]" style={{ borderColor: "var(--border-strong)" }}>
                 ESC
               </kbd>
             </div>
@@ -134,6 +156,7 @@ export function CommandPalette() {
                         </div>
                       )}
                       <button
+                        tabIndex={-1}
                         onMouseEnter={() => setActive(i)}
                         onClick={() => go(r.symbol)}
                         className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start"
